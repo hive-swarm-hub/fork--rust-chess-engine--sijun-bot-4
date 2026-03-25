@@ -190,7 +190,7 @@ echo "Running gauntlet tournament..." >&2
 GAUNTLET_LOG=$(mktemp)
 rm -f "$PGN_OUT"
 
-ANCHOR_CENTER="${ANCHOR_CENTER:-2200}"
+ANCHOR_CENTER="${ANCHOR_CENTER:-2800}"
 STEP=100
 L1=$((ANCHOR_CENTER - 2*STEP))
 L2=$((ANCHOR_CENTER - STEP))
