@@ -185,8 +185,6 @@ const ROOK_SEVENTH_RANK_BONUS: i32 = 14;
 const KNIGHT_OUTPOST_BONUS: i32 = 18;
 const CENTER_PAWN_BONUS: i32 = 10;
 const UNDEVELOPED_MINOR_PENALTY: i32 = 8;
-const BACKWARD_PAWN_PENALTY: i32 = 10;
-const ROOK_BEHIND_PASSED_BONUS: i32 = 20;
 
 const MOBILITY_KNIGHT: i32 = 4;
 const MOBILITY_BISHOP: i32 = 5;
@@ -1660,14 +1658,6 @@ impl RustAlphaBetaEngine {
         white_mg += white_connected;
         black_mg += black_connected;
 
-        // Rook behind passed pawn bonus
-        let white_rbpp = rook_behind_passed_score(board, Color::White);
-        let black_rbpp = rook_behind_passed_score(board, Color::Black);
-        white_mg += white_rbpp / 2;
-        black_mg += black_rbpp / 2;
-        white_eg += white_rbpp;
-        black_eg += black_rbpp;
-
         // Passed pawn king distance (endgame only)
         white_eg += passed_pawn_king_bonus(board, Color::White);
         black_eg += passed_pawn_king_bonus(board, Color::Black);
@@ -2495,28 +2485,6 @@ fn pawn_structure_from_bits(file_bits: &[u8; 8]) -> (i32, i32) {
                 midgame -= ISOLATED_PAWN_PENALTY * count;
                 endgame -= ISOLATED_PAWN_PENALTY * count * 3 / 4;
             }
-            // Backward pawn: no friendly pawns on adjacent files at same or behind rank
-            // that could support it, and the stop square is controlled by enemy pawns
-            if (left | right) != 0 {
-                // Has neighbors, check if any are behind (potential backward)
-                let bits = file_bits[file_idx];
-                let mut rank_idx = 0;
-                let mut temp_bits = bits;
-                while temp_bits != 0 {
-                    if temp_bits & 1 != 0 {
-                        // Check if adjacent pawns are all ahead (this pawn is backward)
-                        let behind_mask: u8 = if rank_idx > 0 { (1u8 << rank_idx) - 1 } else { 0 };
-                        let left_behind = left & behind_mask;
-                        let right_behind = right & behind_mask;
-                        if left_behind == 0 && right_behind == 0 && (left != 0 || right != 0) {
-                            midgame -= BACKWARD_PAWN_PENALTY;
-                            endgame -= BACKWARD_PAWN_PENALTY / 2;
-                        }
-                    }
-                    temp_bits >>= 1;
-                    rank_idx += 1;
-                }
-            }
         }
     }
     (midgame, endgame)
@@ -2949,45 +2917,6 @@ fn king_ring_attack_pressure(board: &Board, color: Color, king_sq: Square) -> i3
     }
 
     pressure
-}
-
-/// Rook behind passed pawn: bonus when our rook supports our passed pawn from behind
-fn rook_behind_passed_score(board: &Board, color: Color) -> i32 {
-    let enemy = !color;
-    let mut score = 0;
-    for pawn_sq in piece_bb(board, color, Piece::Pawn) {
-        let file = file_index(pawn_sq);
-        let rank = rank_index(pawn_sq);
-        let progress = if color == Color::White { rank } else { 7 - rank };
-        if progress < 3 { continue; }
-        // Quick passed pawn check
-        let mut is_passed = true;
-        for df in -1..=1i32 {
-            let ef = file + df;
-            if !(0..=7).contains(&ef) { continue; }
-            for ep_sq in piece_bb(board, enemy, Piece::Pawn) {
-                let er = rank_index(ep_sq);
-                let ef2 = file_index(ep_sq);
-                if ef2 == ef {
-                    if color == Color::White && er > rank { is_passed = false; break; }
-                    if color == Color::Black && er < rank { is_passed = false; break; }
-                }
-            }
-            if !is_passed { break; }
-        }
-        if !is_passed { continue; }
-        // Check if we have a rook on the same file behind this pawn
-        for rook_sq in piece_bb(board, color, Piece::Rook) {
-            if file_index(rook_sq) == file {
-                let rook_rank = rank_index(rook_sq);
-                let behind = if color == Color::White { rook_rank < rank } else { rook_rank > rank };
-                if behind {
-                    score += ROOK_BEHIND_PASSED_BONUS;
-                }
-            }
-        }
-    }
-    score
 }
 
 /// Space evaluation: bonus for controlling squares in the opponent's half
