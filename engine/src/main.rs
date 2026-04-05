@@ -152,7 +152,7 @@ const TT_SIZE: usize = 1 << 22; // 4M entries
 const TT_MASK: usize = TT_SIZE - 1;
 const EVAL_CACHE_SIZE: usize = 1 << 19; // 512K entries
 const EVAL_CACHE_MASK: usize = EVAL_CACHE_SIZE - 1;
-const PAWN_CACHE_SIZE: usize = 1 << 18; // 256K entries
+const PAWN_CACHE_SIZE: usize = 1 << 19; // 512K entries
 const PAWN_CACHE_MASK: usize = PAWN_CACHE_SIZE - 1;
 
 const HISTORY_LIMIT: i32 = 32_000;
@@ -1511,7 +1511,7 @@ impl RustAlphaBetaEngine {
         if self.stopped {
             return true;
         }
-        if self.nodes & 1023 != 0 {
+        if self.nodes & 2047 != 0 {
             return false;
         }
         if let Some(deadline) = self.deadline {
