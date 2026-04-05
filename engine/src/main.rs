@@ -150,7 +150,7 @@ const MAX_ROOT_THREADS: usize = 8;
 // Fixed-size hash tables (power-of-2 for fast masking)
 const TT_SIZE: usize = 1 << 22; // 4M entries
 const TT_MASK: usize = TT_SIZE - 1;
-const EVAL_CACHE_SIZE: usize = 1 << 20; // 1M entries
+const EVAL_CACHE_SIZE: usize = 1 << 19; // 512K entries
 const EVAL_CACHE_MASK: usize = EVAL_CACHE_SIZE - 1;
 const PAWN_CACHE_SIZE: usize = 1 << 18; // 256K entries
 const PAWN_CACHE_MASK: usize = PAWN_CACHE_SIZE - 1;
@@ -201,9 +201,9 @@ const THREAT_QUEEN_BY_ROOK: i32 = 25;
 const PASSED_PAWN_BONUS: [i32; 8] = [0, 8, 12, 20, 35, 60, 90, 0];
 const ENDGAME_PASSED_PAWN_BONUS: [i32; 8] = [0, 0, 4, 8, 16, 32, 56, 0];
 const SUPPORTED_PASSED_PAWN_BONUS: [i32; 8] = [0, 0, 3, 6, 12, 20, 32, 0];
-const REVERSE_FUTILITY_MARGIN: [i32; 7] = [0, 75, 140, 225, 310, 400, 500];
-const FUTILITY_MARGIN: [i32; 7] = [0, 90, 155, 245, 340, 450, 575];
-const RAZOR_MARGIN: [i32; 5] = [0, 230, 360, 500, 650];
+const REVERSE_FUTILITY_MARGIN: [i32; 5] = [0, 75, 140, 225, 310];
+const FUTILITY_MARGIN: [i32; 5] = [0, 90, 155, 245, 340];
+const RAZOR_MARGIN: [i32; 4] = [0, 230, 360, 500];
 
 // Contempt: slight penalty for draws when we likely have advantage
 const CONTEMPT: i32 = 12;
@@ -1034,19 +1034,13 @@ impl RustAlphaBetaEngine {
             && static_eval.map_or(false, |e| e > self.eval_stack[ply - 2]);
 
         if let Some(eval) = static_eval {
-            // Reverse futility pruning (extended to depth 6)
-            let rfp_depth = if improving { 5 } else { 6 };
-            if effective_depth <= rfp_depth
-                && (effective_depth as usize) < REVERSE_FUTILITY_MARGIN.len()
+            if effective_depth <= 4
                 && eval >= beta + REVERSE_FUTILITY_MARGIN[effective_depth as usize]
-                    - if improving { 40 } else { 0 }
                 && beta < MATE_SCORE - 1_000
             {
                 return Some(eval);
             }
-            // Razoring (extended to depth 4)
-            if effective_depth <= 4
-                && (effective_depth as usize) < RAZOR_MARGIN.len()
+            if effective_depth <= 3
                 && eval + RAZOR_MARGIN[effective_depth as usize] <= alpha
                 && alpha > -MATE_SCORE + 1_000
             {
@@ -1159,8 +1153,7 @@ impl RustAlphaBetaEngine {
 
             if is_quiet && !in_check_now && !gives_check_move {
                 if let Some(eval) = static_eval {
-                    if effective_depth <= 6
-                        && (effective_depth as usize) < FUTILITY_MARGIN.len()
+                    if effective_depth <= 4
                         && move_count > 1
                         && eval + FUTILITY_MARGIN[effective_depth as usize] <= alpha
                     {
@@ -1275,12 +1268,6 @@ impl RustAlphaBetaEngine {
                         }
                     }
                     search_depth = (search_depth - reduction).max(0);
-                }
-                // LMR for bad captures: reduce captures with negative SEE
-                if is_capture_move && !in_check_now && effective_depth >= 4 && move_count > 5 {
-                    if static_exchange_eval(board, chess_move) < 0 {
-                        search_depth = (search_depth - 1).max(0);
-                    }
                 }
 
                 let mut score = -self.negamax(
