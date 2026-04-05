@@ -90,10 +90,12 @@ fn main() {
                 let alloc_ms = if let Some(mt) = movetime {
                     mt
                 } else if movestogo > 0 {
-                    // Moves-to-go: allocate time/moves_remaining, keep safety margin
-                    let base = time_ms / (movestogo as u64 + 2);
+                    // Moves-to-go: allocate time proportionally, use more early on
+                    let base = time_ms / (movestogo as u64 + 1);
                     let with_inc = base + inc_ms * 3 / 4;
-                    with_inc.min(time_ms * 2 / 5).max(50)
+                    // Use up to 1.5x average when we have many moves left (complex positions)
+                    let max_frac = if movestogo > 20 { time_ms * 3 / 5 } else { time_ms * 2 / 5 };
+                    with_inc.min(max_frac).max(50)
                 } else {
                     // Sudden death: use 1/20 of remaining
                     let base = time_ms / 20;
@@ -140,7 +142,7 @@ use chess::{
 const INFINITY: i32 = 1_000_000;
 const MATE_SCORE: i32 = 100_000;
 const DRAW_SCORE: i32 = 0;
-const ASPIRATION_WINDOW: i32 = 40;
+const ASPIRATION_WINDOW: i32 = 25;
 const HISTORY_SIZE: usize = 1 << 16;
 const KILLER_PLY_CAPACITY: usize = 128;
 const MAX_ROOT_THREADS: usize = 8;
@@ -684,12 +686,13 @@ impl RustAlphaBetaEngine {
             };
 
             if alpha != -INFINITY && score <= alpha {
-                delta = delta * 3 / 2;
+                delta *= 2;
                 alpha = (score - delta).max(-INFINITY);
+                beta = (score + delta).min(INFINITY);  // Widen both sides on fail-low
                 continue;
             }
             if beta != INFINITY && score >= beta {
-                delta = delta * 3 / 2;
+                delta *= 2;
                 beta = (score + delta).min(INFINITY);
                 continue;
             }
@@ -1160,13 +1163,25 @@ impl RustAlphaBetaEngine {
                 if move_count > late_move_pruning_limit(effective_depth) {
                     continue;
                 }
-                // SEE pruning for quiet moves at low depth
-                if effective_depth <= 4 && move_count > 3
-                    && static_exchange_eval(board, chess_move) < -50 * effective_depth
+                // History pruning: skip quiet moves with very bad history at non-shallow depths
+                let mk = move_key(chess_move) as usize;
+                let hist = self.history_heuristic[mk];
+                if effective_depth <= 6 && move_count > 3 && hist < -4000 * effective_depth {
+                    continue;
+                }
+                // SEE pruning for quiet moves
+                if effective_depth <= 6 && move_count > 3
+                    && static_exchange_eval(board, chess_move) < -40 * effective_depth
                 {
                     continue;
                 }
                 searched_quiets.push(chess_move);
+            }
+            // SEE pruning for bad captures at low depth
+            if is_capture_move && !in_check_now && move_count > 1 && effective_depth <= 3
+                && static_exchange_eval(board, chess_move) < -100 * effective_depth
+            {
+                continue;
             }
             if let Some(victim) = capture_victim {
                 searched_captures.push((chess_move, victim));
