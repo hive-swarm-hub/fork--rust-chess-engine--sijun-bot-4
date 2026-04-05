@@ -13,3 +13,5 @@ results.tsv
 
 # OS files
 .DS_Store
+run.log
+config.json
