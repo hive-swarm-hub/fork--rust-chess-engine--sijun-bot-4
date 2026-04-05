@@ -174,7 +174,7 @@ const BISHOP: i32 = 333;
 const ROOK: i32 = 550;
 const QUEEN: i32 = 950;
 
-const BISHOP_PAIR_BONUS: i32 = 45;
+const BISHOP_PAIR_BONUS: i32 = 50;
 const CASTLED_KING_BONUS: i32 = 18;
 const DOUBLED_PAWN_PENALTY: i32 = 14;
 const ISOLATED_PAWN_PENALTY: i32 = 11;
@@ -186,10 +186,10 @@ const KNIGHT_OUTPOST_BONUS: i32 = 18;
 const CENTER_PAWN_BONUS: i32 = 10;
 const UNDEVELOPED_MINOR_PENALTY: i32 = 8;
 
-const MOBILITY_KNIGHT: i32 = 4;
-const MOBILITY_BISHOP: i32 = 5;
-const MOBILITY_ROOK: i32 = 2;
-const MOBILITY_QUEEN: i32 = 1;
+const MOBILITY_KNIGHT: i32 = 5;
+const MOBILITY_BISHOP: i32 = 6;
+const MOBILITY_ROOK: i32 = 3;
+const MOBILITY_QUEEN: i32 = 2;
 
 const CONNECTED_ROOKS_BONUS: i32 = 10;
 const MINOR_BEHIND_PAWN_BONUS: i32 = 5;
@@ -251,6 +251,30 @@ fn build_opening_book() -> HashMap<u64, &'static str> {
         &["d2d4", "d7d5", "c2c4", "c7c6", "g1f3", "g8f6", "b1c3", "d5c4", "a2a4"],
         // Grunfeld
         &["d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "d7d5", "c4d5", "f6d5", "e2e4"],
+        // Ruy Lopez: Morphy Defense
+        &["e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5a4", "g8f6", "e1g1", "f8e7", "f1e1", "b7b5", "b5b3"],
+        // Italian: Giuoco Pianissimo
+        &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "d2d3", "g8f6", "c2c3"],
+        // Sicilian: Dragon
+        &["e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3", "g7g6", "c1e3"],
+        // Sicilian: Alapin
+        &["e2e4", "c7c5", "c2c3", "g8f6", "e4e5", "f6d5", "d2d4"],
+        // Queen's Gambit Accepted
+        &["d2d4", "d7d5", "c2c4", "d5c4", "g1f3", "g8f6", "e2e3", "e7e6", "f1c4"],
+        // Queen's Indian
+        &["d2d4", "g8f6", "c2c4", "e7e6", "g1f3", "b7b6", "g2g3", "c8b7", "f1g2"],
+        // Semi-Slav
+        &["d2d4", "d7d5", "c2c4", "c7c6", "g1f3", "g8f6", "b1c3", "e7e6", "e2e3"],
+        // King's Indian: Classical
+        &["d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7", "e2e4", "d7d6", "g1f3", "e8g8", "f1e2"],
+        // Petroff Defense
+        &["e2e4", "e7e5", "g1f3", "g8f6", "f3e5", "d7d6", "e5f3", "f6e4", "d2d4"],
+        // Four Knights
+        &["e2e4", "e7e5", "g1f3", "b8c6", "b1c3", "g8f6", "f1b5"],
+        // Vienna Game
+        &["e2e4", "e7e5", "b1c3", "g8f6", "f1c4"],
+        // Benko Gambit
+        &["d2d4", "g8f6", "c2c4", "c7c5", "d4d5", "b7b5", "c4b5", "a7a6"],
         // Default opening moves
         &["e2e4"],
         &["e2e4", "e7e5", "g1f3"],
