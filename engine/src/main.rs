@@ -148,7 +148,7 @@ const KILLER_PLY_CAPACITY: usize = 128;
 const MAX_ROOT_THREADS: usize = 8;
 
 // Fixed-size hash tables (power-of-2 for fast masking)
-const TT_SIZE: usize = 1 << 22; // 4M entries
+const TT_SIZE: usize = 1 << 23; // 8M entries
 const TT_MASK: usize = TT_SIZE - 1;
 const EVAL_CACHE_SIZE: usize = 1 << 19; // 512K entries
 const EVAL_CACHE_MASK: usize = EVAL_CACHE_SIZE - 1;
@@ -417,12 +417,13 @@ struct TTEntry {
     depth: i32,
     score: i32,
     flag: u8,
+    age: u8,
     best_move: Option<ChessMove>,
 }
 
 impl Default for TTEntry {
     fn default() -> Self {
-        Self { key: 0, depth: 0, score: 0, flag: 0, best_move: None }
+        Self { key: 0, depth: 0, score: 0, flag: 0, age: 0, best_move: None }
     }
 }
 
@@ -533,6 +534,7 @@ struct RustAlphaBetaEngine {
     pawn_cache: Vec<PawnCacheEntry>,
     deadline: Option<Instant>,
     stopped: bool,
+    tt_age: u8,
     opening_book: HashMap<u64, &'static str>,
 }
 
@@ -555,6 +557,7 @@ impl RustAlphaBetaEngine {
             pawn_cache: vec![PawnCacheEntry::default(); PAWN_CACHE_SIZE],
             deadline: None,
             stopped: false,
+            tt_age: 0,
             opening_book: build_opening_book(),
         }
     }
@@ -611,6 +614,7 @@ impl RustAlphaBetaEngine {
         } else {
             requested_depth.max(1)
         };
+        self.tt_age = self.tt_age.wrapping_add(1);
         self.nodes = 0;
         self.stopped = false;
         let search_start = Instant::now();
@@ -915,6 +919,7 @@ impl RustAlphaBetaEngine {
             pawn_cache: self.pawn_cache.clone(),
             deadline: self.deadline,
             stopped: false,
+            tt_age: self.tt_age,
             opening_book: HashMap::new(), // Workers don't need the opening book
         }
     }
@@ -949,12 +954,13 @@ impl RustAlphaBetaEngine {
         let key = board_hash(board);
         let idx = key as usize & TT_MASK;
         let existing = &self.tt[idx];
-        if existing.key == 0 || depth >= existing.depth || existing.key == key {
+        if existing.key == 0 || depth >= existing.depth || existing.key == key || existing.age != self.tt_age {
             self.tt[idx] = TTEntry {
                 key,
                 depth,
                 score,
                 flag,
+                age: self.tt_age,
                 best_move: Some(best_move),
             };
         }
@@ -1400,10 +1406,11 @@ impl RustAlphaBetaEngine {
             depth: effective_depth,
             score: best_score,
             flag,
+            age: self.tt_age,
             best_move,
         };
         let existing = &self.tt[tt_idx];
-        if existing.key == 0 || new_entry.depth >= existing.depth || existing.key == tt_key {
+        if existing.key == 0 || new_entry.depth >= existing.depth || existing.key == tt_key || existing.age != self.tt_age {
             self.tt[tt_idx] = new_entry;
         }
         Some(best_score)
