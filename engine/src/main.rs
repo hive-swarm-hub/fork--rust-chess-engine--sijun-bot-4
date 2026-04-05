@@ -1426,6 +1426,25 @@ impl RustAlphaBetaEngine {
             return Some(terminal_score);
         }
 
+        // TT probe in quiescence
+        let tt_key = board_hash(board);
+        let tt_idx = tt_key as usize & TT_MASK;
+        let tt_move = {
+            let entry = &self.tt[tt_idx];
+            if entry.key == tt_key {
+                // TT cutoff in qsearch
+                match entry.flag {
+                    EXACT => return Some(entry.score),
+                    LOWER_BOUND => if entry.score >= beta { return Some(entry.score); },
+                    UPPER_BOUND => if entry.score <= alpha { return Some(entry.score); },
+                    _ => {}
+                }
+                entry.best_move
+            } else {
+                None
+            }
+        };
+
         let in_check_now = in_check(board);
         let stand_pat = self.evaluate(board);
         if !in_check_now {
@@ -1435,7 +1454,7 @@ impl RustAlphaBetaEngine {
             alpha = alpha.max(stand_pat);
         }
 
-        let mut move_picker = self.scored_moves(board, None, ply, !in_check_now);
+        let mut move_picker = self.scored_moves(board, tt_move, ply, !in_check_now);
         for index in 0..move_picker.len() {
             let chess_move = pick_next_move(&mut move_picker, index)?;
             if !in_check_now {
