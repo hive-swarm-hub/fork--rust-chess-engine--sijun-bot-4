@@ -1646,6 +1646,12 @@ impl RustAlphaBetaEngine {
         white_eg += white_threats / 2;
         black_eg += black_threats / 2;
 
+        // Space evaluation (midgame only)
+        let white_space = space_score(board, Color::White);
+        let black_space = space_score(board, Color::Black);
+        white_mg += white_space;
+        black_mg += black_space;
+
         // Connected rooks bonus
         let white_connected = connected_rooks_score(board, Color::White);
         let black_connected = connected_rooks_score(board, Color::Black);
@@ -2861,16 +2867,17 @@ fn king_safety_score(
         }
     }
 
-    // Bitboard-based king ring attack pressure
+    // Bitboard-based king ring attack pressure with quadratic scaling
     let pressure = king_ring_attack_pressure(board, color, king_sq);
     if pressure > 0 {
         let enemy_has_queen = piece_bb(board, !color, Piece::Queen) != BitBoard(0);
-        let multiplier = if enemy_has_queen {
-            phase + 6
+        // Quadratic scaling: (pressure^2 / 16) gives disproportionate penalty for coordinated attacks
+        let base_penalty = if enemy_has_queen {
+            pressure * pressure / 12
         } else {
-            phase + 1
+            pressure * pressure / 20
         };
-        score -= pressure * multiplier / 12;
+        score -= base_penalty.min(200); // Cap to avoid overweighting
     }
 
     score
@@ -2910,4 +2917,47 @@ fn king_ring_attack_pressure(board: &Board, color: Color, king_sq: Square) -> i3
     }
 
     pressure
+}
+
+/// Space evaluation: bonus for controlling squares in the opponent's half
+/// Only meaningful in the middlegame when both sides have significant pieces
+fn space_score(board: &Board, color: Color) -> i32 {
+    let own = *board.color_combined(color);
+    let occupied = *board.combined();
+    let enemy = !color;
+
+    // Only compute space when there are enough pieces
+    let our_pieces = piece_bb(board, color, Piece::Knight).popcnt()
+        + piece_bb(board, color, Piece::Bishop).popcnt()
+        + piece_bb(board, color, Piece::Rook).popcnt()
+        + piece_bb(board, color, Piece::Queen).popcnt();
+    if our_pieces < 3 { return 0; }
+
+    // Define the space area: ranks 2-4 for white, ranks 5-7 for black, files c-f (central)
+    // White space mask: ranks 1-4 (indices 0-3), files 2-5
+    // Black space mask: ranks 4-7 (indices 4-7), files 2-5
+    let mut safe_squares = 0i32;
+    let our_pawns = piece_bb(board, color, Piece::Pawn);
+    let enemy_pawns = piece_bb(board, enemy, Piece::Pawn);
+
+    // Count safe squares behind our pawns (space we control)
+    for square in our_pawns {
+        let rank = rank_index(square);
+        let file = file_index(square);
+        if file < 2 || file > 5 { continue; } // Only central files
+        let behind_count = if color == Color::White { rank } else { 7 - rank };
+        safe_squares += behind_count.min(4);
+    }
+
+    // Bonus for squares attacked by our pieces but not by enemy pawns
+    for square in piece_bb(board, color, Piece::Knight) {
+        let attacks = get_knight_moves(square) & !own;
+        safe_squares += attacks.popcnt() as i32 / 3;
+    }
+    for square in piece_bb(board, color, Piece::Bishop) {
+        let attacks = get_bishop_moves(square, occupied) & !own;
+        safe_squares += attacks.popcnt() as i32 / 3;
+    }
+
+    safe_squares / 2
 }
