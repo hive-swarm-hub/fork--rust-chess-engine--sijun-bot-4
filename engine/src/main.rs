@@ -198,9 +198,9 @@ const THREAT_ROOK_BY_MINOR: i32 = 20;
 const THREAT_QUEEN_BY_MINOR: i32 = 30;
 const THREAT_QUEEN_BY_ROOK: i32 = 25;
 
-const PASSED_PAWN_BONUS: [i32; 8] = [0, 10, 15, 25, 45, 75, 110, 0];
-const ENDGAME_PASSED_PAWN_BONUS: [i32; 8] = [0, 0, 6, 12, 24, 48, 80, 0];
-const SUPPORTED_PASSED_PAWN_BONUS: [i32; 8] = [0, 0, 4, 8, 16, 28, 44, 0];
+const PASSED_PAWN_BONUS: [i32; 8] = [0, 8, 12, 20, 35, 60, 90, 0];
+const ENDGAME_PASSED_PAWN_BONUS: [i32; 8] = [0, 0, 4, 8, 16, 32, 56, 0];
+const SUPPORTED_PASSED_PAWN_BONUS: [i32; 8] = [0, 0, 3, 6, 12, 20, 32, 0];
 const REVERSE_FUTILITY_MARGIN: [i32; 5] = [0, 75, 140, 225, 310];
 const FUTILITY_MARGIN: [i32; 5] = [0, 90, 155, 245, 340];
 const RAZOR_MARGIN: [i32; 4] = [0, 230, 360, 500];
