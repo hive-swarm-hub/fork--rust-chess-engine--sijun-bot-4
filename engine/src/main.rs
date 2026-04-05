@@ -146,7 +146,7 @@ const KILLER_PLY_CAPACITY: usize = 128;
 const MAX_ROOT_THREADS: usize = 8;
 
 // Fixed-size hash tables (power-of-2 for fast masking)
-const TT_SIZE: usize = 1 << 21; // 2M entries
+const TT_SIZE: usize = 1 << 22; // 4M entries
 const TT_MASK: usize = TT_SIZE - 1;
 const EVAL_CACHE_SIZE: usize = 1 << 19; // 512K entries
 const EVAL_CACHE_MASK: usize = EVAL_CACHE_SIZE - 1;
@@ -156,6 +156,8 @@ const PAWN_CACHE_MASK: usize = PAWN_CACHE_SIZE - 1;
 const HISTORY_LIMIT: i32 = 32_000;
 const CAPTURE_HISTORY_PIECES: usize = 6;
 const CAPTURE_HISTORY_LIMIT: i32 = 16_000;
+const CONTINUATION_HISTORY_SIZE: usize = 64 * 6; // 64 squares * 6 piece types
+const CONTINUATION_HISTORY_LIMIT: i32 = 16_000;
 const MAX_TIME_SEARCH_DEPTH: i32 = 64;
 const PHASE_TOTAL: i32 = 24;
 const SEE_PRUNE_MARGIN: i32 = 80;
@@ -497,7 +499,9 @@ struct RustAlphaBetaEngine {
     history_heuristic: Vec<i32>,
     capture_history: Vec<i16>,
     countermove: Vec<Option<ChessMove>>,  // indexed by previous move's move_key
+    continuation_history: Vec<i16>, // [prev_piece*64+prev_to][cur_piece*64+cur_to], flat 384*384
     move_stack: Vec<Option<ChessMove>>,  // move played at each ply for countermove tracking
+    piece_stack: Vec<Option<Piece>>,     // piece moved at each ply
     eval_stack: Vec<i32>,  // static eval at each ply for improving detection
     eval_cache: Vec<EvalCacheEntry>,
     pawn_cache: Vec<PawnCacheEntry>,
@@ -517,7 +521,9 @@ impl RustAlphaBetaEngine {
             history_heuristic: vec![0; HISTORY_SIZE],
             capture_history: vec![0; HISTORY_SIZE * CAPTURE_HISTORY_PIECES],
             countermove: vec![None; HISTORY_SIZE],
+            continuation_history: vec![0i16; CONTINUATION_HISTORY_SIZE * CONTINUATION_HISTORY_SIZE],
             move_stack: vec![None; KILLER_PLY_CAPACITY],
+            piece_stack: vec![None; KILLER_PLY_CAPACITY],
             eval_stack: vec![0; KILLER_PLY_CAPACITY],
             eval_cache: vec![EvalCacheEntry::default(); EVAL_CACHE_SIZE],
             pawn_cache: vec![PawnCacheEntry::default(); PAWN_CACHE_SIZE],
@@ -874,7 +880,9 @@ impl RustAlphaBetaEngine {
             history_heuristic: self.history_heuristic.clone(),
             capture_history: self.capture_history.clone(),
             countermove: self.countermove.clone(),
+            continuation_history: self.continuation_history.clone(),
             move_stack: self.move_stack.clone(),
+            piece_stack: self.piece_stack.clone(),
             eval_stack: self.eval_stack.clone(),
             eval_cache: self.eval_cache.clone(),
             pawn_cache: self.pawn_cache.clone(),
@@ -1043,7 +1051,12 @@ impl RustAlphaBetaEngine {
             && beta < MATE_SCORE - 1_000
         {
             if let Some(null_board) = board.null_move() {
-                let reduction = 2 + effective_depth / 3;
+                // Modern null move reduction: R = 3 + depth/4 + min((eval-beta)/200, 3)
+                let mut reduction = 3 + effective_depth / 4;
+                if let Some(eval) = static_eval {
+                    let eval_bonus = ((eval - beta) / 200).min(3).max(0);
+                    reduction += eval_bonus;
+                }
                 let null_hash = board_hash(&null_board);
                 repetition.push(null_hash);
                 let search = self.negamax(
@@ -1058,6 +1071,43 @@ impl RustAlphaBetaEngine {
                 let score = -search?;
                 if score >= beta {
                     return Some(score);
+                }
+            }
+        }
+
+        // Probcut: if a shallow search with a wider margin still beats beta, prune
+        if effective_depth >= 5
+            && !in_check_now
+            && beta < MATE_SCORE - 1_000
+            && static_eval.map_or(false, |e| e >= beta - 100)
+        {
+            let probcut_beta = beta + 200;
+            let probcut_depth = effective_depth - 4;
+            let mut captures = self.scored_moves(board, tt_move, ply, true);
+            for ci in 0..captures.len() {
+                let cap_move = match pick_next_move(&mut captures, ci) {
+                    Some(m) => m,
+                    None => break,
+                };
+                if static_exchange_eval(board, cap_move) < 0 {
+                    continue;
+                }
+                let child = board.make_move_new(cap_move);
+                let child_hash = board_hash(&child);
+                repetition.push(child_hash);
+                let search_result = self.negamax(
+                    &child,
+                    probcut_depth,
+                    -probcut_beta,
+                    -probcut_beta + 1,
+                    ply + 1,
+                    repetition,
+                );
+                repetition.pop(child_hash);
+                if let Some(s) = search_result {
+                    if -s >= probcut_beta {
+                        return Some(-s);
+                    }
                 }
             }
         }
@@ -1139,9 +1189,10 @@ impl RustAlphaBetaEngine {
                 }
             }
 
-            // Track move at this ply for countermove recording
+            // Track move and piece at this ply for countermove/continuation history
             self.ensure_ply_capacity(ply + 2);
             self.move_stack[ply] = Some(chess_move);
+            self.piece_stack[ply] = board.piece_on(chess_move.get_source());
 
             repetition.push(child_hash);
 
@@ -1174,12 +1225,32 @@ impl RustAlphaBetaEngine {
                     if !improving {
                         reduction += 1;
                     }
-                    // Reduce more for moves with bad history
+                    // Reduce based on history scores
                     let hist = self.history_heuristic[mk];
                     if hist < -2000 {
                         reduction += 1;
                     } else if hist > 8000 {
                         reduction = (reduction - 1).max(0);
+                    }
+                    // Continuation history influence on LMR
+                    if ply > 0 {
+                        if let (Some(prev_move), Some(prev_piece)) = (
+                            self.move_stack[ply - 1],
+                            self.piece_stack[ply - 1],
+                        ) {
+                            let moving_piece = board.piece_on(chess_move.get_source()).unwrap_or(Piece::Pawn);
+                            let prev_k = continuation_key(prev_piece, prev_move.get_dest());
+                            let cur_k = continuation_key(moving_piece, chess_move.get_dest());
+                            let ch_idx = continuation_history_index(prev_k, cur_k);
+                            if ch_idx < self.continuation_history.len() {
+                                let ch = i32::from(self.continuation_history[ch_idx]);
+                                if ch < -3000 {
+                                    reduction += 1;
+                                } else if ch > 5000 {
+                                    reduction = (reduction - 1).max(0);
+                                }
+                            }
+                        }
                     }
                     search_depth = (search_depth - reduction).max(0);
                 }
@@ -1233,6 +1304,25 @@ impl RustAlphaBetaEngine {
                     if ply > 0 {
                         if let Some(prev_move) = self.move_stack[ply - 1] {
                             self.countermove[move_key(prev_move) as usize] = Some(chess_move);
+                        }
+                    }
+                    // Update continuation history
+                    if ply > 0 {
+                        if let (Some(prev_move), Some(prev_piece)) = (
+                            self.move_stack[ply - 1],
+                            self.piece_stack[ply - 1],
+                        ) {
+                            let moving_piece = board.piece_on(chess_move.get_source()).unwrap_or(Piece::Pawn);
+                            let prev_k = continuation_key(prev_piece, prev_move.get_dest());
+                            let cur_k = continuation_key(moving_piece, chess_move.get_dest());
+                            self.update_continuation_history(prev_k, cur_k, bonus);
+                            for previous in searched_quiets.iter().copied() {
+                                if previous != chess_move {
+                                    let pp = board.piece_on(previous.get_source()).unwrap_or(Piece::Pawn);
+                                    let pk = continuation_key(pp, previous.get_dest());
+                                    self.update_continuation_history(prev_k, pk, -bonus);
+                                }
+                            }
                         }
                     }
                     for previous in searched_quiets.iter().copied() {
@@ -1674,6 +1764,22 @@ impl RustAlphaBetaEngine {
             }
         }
 
+        // Continuation history: bonus based on previous move's piece/destination
+        if is_quiet && ply > 0 {
+            if let (Some(prev_move), Some(prev_piece)) = (
+                self.move_stack.get(ply - 1).copied().flatten(),
+                self.piece_stack.get(ply - 1).copied().flatten(),
+            ) {
+                let moving_piece = board.piece_on(chess_move.get_source()).unwrap_or(Piece::Pawn);
+                let prev_key = continuation_key(prev_piece, prev_move.get_dest());
+                let cur_key = continuation_key(moving_piece, chess_move.get_dest());
+                let idx = continuation_history_index(prev_key, cur_key);
+                if idx < self.continuation_history.len() {
+                    score += i32::from(self.continuation_history[idx]);
+                }
+            }
+        }
+
         if is_castling(board, chess_move) {
             score += 10_000;
         }
@@ -1707,12 +1813,25 @@ impl RustAlphaBetaEngine {
         *history = updated.clamp(-CAPTURE_HISTORY_LIMIT, CAPTURE_HISTORY_LIMIT) as i16;
     }
 
+    fn update_continuation_history(&mut self, prev_key: usize, cur_key: usize, bonus: i32) {
+        let idx = continuation_history_index(prev_key, cur_key);
+        if idx < self.continuation_history.len() {
+            let h = i32::from(self.continuation_history[idx]);
+            let clamped = bonus.clamp(-CONTINUATION_HISTORY_LIMIT, CONTINUATION_HISTORY_LIMIT);
+            let updated = h + clamped - h * clamped.abs() / CONTINUATION_HISTORY_LIMIT;
+            self.continuation_history[idx] = updated.clamp(-CONTINUATION_HISTORY_LIMIT, CONTINUATION_HISTORY_LIMIT) as i16;
+        }
+    }
+
     fn ensure_ply_capacity(&mut self, size: usize) {
         if self.killer_moves.len() < size {
             self.killer_moves.resize(size, [None, None]);
         }
         if self.move_stack.len() < size {
             self.move_stack.resize(size, None);
+        }
+        if self.piece_stack.len() < size {
+            self.piece_stack.resize(size, None);
         }
         if self.eval_stack.len() < size {
             self.eval_stack.resize(size, 0);
@@ -1818,6 +1937,14 @@ fn capture_piece_index(piece: Piece) -> usize {
 
 fn capture_history_key(chess_move: ChessMove, victim: Piece) -> usize {
     move_key(chess_move) as usize * CAPTURE_HISTORY_PIECES + capture_piece_index(victim)
+}
+
+fn continuation_key(piece: Piece, to_sq: Square) -> usize {
+    piece_index(piece) * 64 + square_index(to_sq)
+}
+
+fn continuation_history_index(prev_key: usize, cur_key: usize) -> usize {
+    prev_key * CONTINUATION_HISTORY_SIZE + cur_key
 }
 
 fn color_index(color: Color) -> usize {

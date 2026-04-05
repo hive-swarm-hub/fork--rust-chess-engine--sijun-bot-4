@@ -1,0 +1,6 @@
+WARNING: No checksum file found. Run prepare.sh to create one.
+Compiling engine...
+Compiled in 0s.
+Running parallel gauntlet tournament with SPRT (concurrency: 12)... 🚀
+Gauntlet: 5 SF levels (2600-3000) x 200 games max (parallel)...
+Running: tools/fastchess -concurrency 12 -sprt elo0=0 elo1=35 alpha=0.05 beta=0.05 -resign movecount=3 score=600 -draw movenumber=34 movecount=8 score=10 -engine cmd=engine/target/release/hive-chess proto=uci name=HiveChess tc=40/120 -engine cmd=tools/stockfish proto=uci name=SF_2600 tc=40/120 option.UCI_LimitStrength=true option.UCI_Elo=2600 option.Threads=1 option.Hash=16 -engine cmd=tools/stockfish proto=uci name=SF_2700 tc=40/120 option.UCI_LimitStrength=true option.UCI_Elo=2700 option.Threads=1 option.Hash=16 -engine cmd=tools/stockfish proto=uci name=SF_2800 tc=40/120 option.UCI_LimitStrength=true option.UCI_Elo=2800 option.Threads=1 option.Hash=16 -engine cmd=tools/stockfish proto=uci name=SF_2900 tc=40/120 option.UCI_LimitStrength=true option.UCI_Elo=2900 option.Threads=1 option.Hash=16 -engine cmd=tools/stockfish proto=uci name=SF_3000 tc=40/120 option.UCI_LimitStrength=true option.UCI_Elo=3000 option.Threads=1 option.Hash=16 -tournament gauntlet -rounds 100 -games 2 -repeat -pgnout file=eval/games.pgn -recover -wait 50 -openings file=eval/openings.epd format=epd order=random
