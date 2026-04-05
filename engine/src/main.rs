@@ -206,7 +206,7 @@ const FUTILITY_MARGIN: [i32; 5] = [0, 90, 155, 245, 340];
 const RAZOR_MARGIN: [i32; 4] = [0, 230, 360, 500];
 
 // Contempt: slight penalty for draws when we likely have advantage
-const CONTEMPT: i32 = 12;
+const CONTEMPT: i32 = 8;
 
 /// Build the opening book: maps position hash -> best move UCI string.
 /// These are strong opening moves from theory, covering common openings.
@@ -2689,9 +2689,9 @@ fn mopup_score(board: &Board, color: Color) -> i32 {
 
     let mut score = 0;
     // Bonus for enemy king being far from center (pushed to edge/corner)
-    score += center_distance(enemy_king) * 8;
+    score += center_distance(enemy_king) * 10;
     // Bonus for our king being close to enemy king (to help checkmate)
-    score += (14 - chebyshev_distance(our_king, enemy_king)) * 4;
+    score += (14 - chebyshev_distance(our_king, enemy_king)) * 6;
 
     score
 }
